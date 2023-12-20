@@ -1,0 +1,105 @@
+version: '3'
+services:
+  dev-elasticsearch:
+    #image: docker.elastic.co/elasticsearch/elasticsearch:7.15.1
+    #image: elasticsearch:7.16.3
+    image: elasticsearch:7.17.9
+    restart: always
+    container_name: dev-elasticsearch
+    environment:
+      - node.name=dev-elasticsearch
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms6g -Xmx6g"
+      - xpack.security.enabled=true
+      - xpack.security.transport.ssl.enabled=false
+      - ELASTICS_USERNAME=elastic
+      - ELASTIC_PASSWORD=user
+        #- "xpack.security.user=elastic:user123"
+      - xpack.ilm.enabled=true
+    ulimits:
+        memlock:
+              soft: -1
+              hard: -1
+    ports:
+      - 9200:9200
+      - 9300:9300
+    volumes:
+      - ./esdata:/usr/share/elasticsearch/data
+
+  dev-elasticsearch_exporter:
+    image: quay.io/prometheuscommunity/elasticsearch-exporter:latest
+    command:
+            - '--es.uri=http://user:password@<elk-ipaddress>:9200'
+        #- '--log.level=debug'
+      - '--es.all'
+        #    environment:
+            #      - 'ES_USER=user'
+            #      - 'ES_PASS=password'
+
+    restart: always
+    ports:
+      - "9114:9114"
+    depends_on:
+      - dev-elasticsearch 
+
+  dev-kibana:
+    restart: always
+    #image: docker.elastic.co/kibana/kibana:7.15.1
+    #image: kibana:7.16.3
+    image: kibana:7.17.9
+    container_name: dev-kibana
+    environment:
+      - "ELASTICSEARCH_URL=http://dev-elasticsearch:9200"
+      - "ELASTICSEARCH_HOSTS=http://dev-elasticsearch:9200"
+      - "ELASTICSEARCH_USERNAME=user"
+      - "ELASTICSEARCH_PASSWORD=password"
+      - "apm-server.kibana.enabled=true"
+      - "apm-server.kibana.host=http://localhost:5601"
+      - "xpack.fleet.enabled=true"
+      - "xpack.fleet.packages=true"
+      - "xpack.fleet.agents.fleet_server.hosts=http://apm-server:8200"
+
+
+    ports:
+      - 5601:5601
+    depends_on:
+      - dev-elasticsearch
+    volumes:
+      - ./kibanadata:/usr/share/kibana/data
+
+  dev-apm-server:
+    #image: docker.elastic.co/apm/apm-server:7.16.1
+    #image:  elastic/apm-server:7.16.3
+    image:  elastic/apm-server:7.17.9
+    restart: always
+    ports:
+      - "8200:8200"
+      - "6060:6060"
+    container_name: dev-apm
+    environment:
+      - QUEUE_MEM_EVENTS=10000
+      - QUEUE_FLUSH_TIMEOUT=5s
+    command: >
+      apm-server -e
+         -E output.elasticsearch.hosts=["dev-elasticsearch:9200"]
+         -E output.elasticsearch.protocol=http
+         -E output.elasticsearch.username=user
+         -E output.elasticsearch.password=password
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    logging:
+      driver: 'json-file'
+      options:
+          max-size: '2m'
+          max-file: '5'
+    depends_on:
+      - dev-elasticsearch
+    volumes:
+      - ./apm-conf/ilm-policy.json:/usr/share/apm-server/ilm-policy.json
